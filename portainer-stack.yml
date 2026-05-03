@@ -28,7 +28,6 @@
 #   UPSTREAM_REAL_IP_RECURSIVE off (default)
 #   PROXY_READ_TIMEOUT       120 (seconds, increase for slow reports)
 #   CLIENT_MAX_BODY_SIZE     50m (increase for large file uploads)
-#   PULL_POLICY              always (default)
 #   RESTART_POLICY           unless-stopped (default)
 #   CUSTOM_IMAGE             frappe/erpnext (default, override for custom builds)
 #   CUSTOM_TAG               (defaults to ERPNEXT_VERSION)
@@ -53,8 +52,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 x-image: &image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      ERPNEXT_VERSION: ${ERPNEXT_VERSION}
   image: ${CUSTOM_IMAGE:-frappe/erpnext}:${CUSTOM_TAG:-$ERPNEXT_VERSION}
-  pull_policy: ${PULL_POLICY:-always}
+  pull_policy: build
   restart: ${RESTART_POLICY:-unless-stopped}
 
 # PGSSLMODE is read by psycopg2/libpq on every postgres connection.
@@ -77,8 +81,6 @@ x-backend-defaults: &backend_defaults
     <<: *db_ssl
   volumes:
     - sites:/home/frappe/frappe-bench/sites
-    - ./patches/frappe/database/postgres/setup_db.py:/home/frappe/frappe-bench/apps/frappe/frappe/database/postgres/setup_db.py:ro
-    - ./patches/frappe/utils/goal.py:/home/frappe/frappe-bench/apps/frappe/frappe/utils/goal.py:ro
   depends_on:
     configurator:
       condition: service_completed_successfully
@@ -111,7 +113,6 @@ services:
     restart: on-failure
     volumes:
       - sites:/home/frappe/frappe-bench/sites
-      - ./patches/frappe/database/postgres/setup_db.py:/home/frappe/frappe-bench/apps/frappe/frappe/database/postgres/setup_db.py:ro
 
   # ── Application backend (Gunicorn on :8000) ─────────────────────────────────
   backend:
