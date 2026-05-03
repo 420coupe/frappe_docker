@@ -1,0 +1,21 @@
+# Attaches the ERPNext frontend to an existing Nginx Proxy Manager network.
+# The NPM container can then proxy to frontend:8080 by container name.
+#
+# Usage (standalone):
+#   docker compose -f compose.yaml -f overrides/compose.redis.yaml \
+#     -f overrides/compose.npmnetwork.yaml up -d
+#
+# Expects the external network to already exist (created by NPM's own stack).
+# Default network name: nginxproxymanager_default
+# Override with: NPM_NETWORK=my_custom_network docker compose ...
+
+services:
+  frontend:
+    networks:
+      - default
+      - npmnetwork
+
+networks:
+  npmnetwork:
+    name: ${NPM_NETWORK:-nginxproxymanager_default}
+    external: true
