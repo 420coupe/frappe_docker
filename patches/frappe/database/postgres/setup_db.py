@@ -10,14 +10,27 @@ def setup_database():
 	root_conn = get_root_connection()
 	root_conn.commit()
 	root_conn.sql("end")
-	root_conn.sql(f'DROP DATABASE IF EXISTS "{frappe.conf.db_name}"')
+	if frappe.conf.db_name == "postgres":
+		# Single-site mode: reuse the postgres DB, wipe and recreate public schema.
+		# DROP SCHEMA loses schema-level ACLs so we restore them afterward.
+		# Database-level default privileges (anon/authenticated/service_role on tables)
+		# are DB-scoped and survive the schema drop — no need to re-grant them.
+		root_conn.sql("DROP SCHEMA IF EXISTS public CASCADE")
+		root_conn.sql("CREATE SCHEMA public")
+		root_conn.sql("GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role")
+		root_conn.sql("GRANT CREATE ON SCHEMA public TO postgres")
+	else:
+		root_conn.sql(f'DROP DATABASE IF EXISTS "{frappe.conf.db_name}"')
 
 	# If user exists, just update password
 	if root_conn.sql(f"SELECT 1 FROM pg_roles WHERE rolname='{frappe.conf.db_user}'"):
 		root_conn.sql(f"ALTER USER \"{frappe.conf.db_user}\" WITH PASSWORD '{frappe.conf.db_password}'")
 	else:
 		root_conn.sql(f"CREATE USER \"{frappe.conf.db_user}\" WITH PASSWORD '{frappe.conf.db_password}'")
-	root_conn.sql(f'CREATE DATABASE "{frappe.conf.db_name}"')
+
+	if frappe.conf.db_name != "postgres":
+		root_conn.sql(f'CREATE DATABASE "{frappe.conf.db_name}"')
+
 	root_conn.sql(f'GRANT ALL PRIVILEGES ON DATABASE "{frappe.conf.db_name}" TO "{frappe.conf.db_user}"')
 	if psql_version := root_conn.sql("SHOW server_version_num", as_dict=True):
 		semver_version_num = psql_version[0].get("server_version_num") or "140000"
@@ -96,10 +109,21 @@ def get_root_connection():
 def drop_user_and_database(db_name, db_user):
 	root_conn = get_root_connection()
 	root_conn.commit()
-	root_conn.sql(
-		"SELECT pg_terminate_backend (pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = %s",
-		(db_name,),
-	)
+	try:
+		# Supabase: pg_terminate_backend requires SUPERUSER which is blocked.
+		# Skip gracefully — DROP DATABASE/SCHEMA handles open connections anyway.
+		root_conn.sql(
+			"SELECT pg_terminate_backend (pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = %s",
+			(db_name,),
+		)
+	except Exception:
+		pass
 	root_conn.sql("end")
-	root_conn.sql(f"DROP DATABASE IF EXISTS {db_name}")
+	if db_name == "postgres":
+		root_conn.sql("DROP SCHEMA IF EXISTS public CASCADE")
+		root_conn.sql("CREATE SCHEMA public")
+		root_conn.sql("GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role")
+		root_conn.sql("GRANT CREATE ON SCHEMA public TO postgres")
+	else:
+		root_conn.sql(f"DROP DATABASE IF EXISTS {db_name}")
 	root_conn.sql(f"DROP USER IF EXISTS {db_user}")
