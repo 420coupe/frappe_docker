@@ -1,7 +1,7 @@
 # portainer-stack.yml
 # ERPNext production stack for Portainer Git deployment.
 #
-# Database : External Supabase PostgreSQL (no local db container)
+# Database : External Supabase PostgreSQL (session pooler, no local db container)
 # Proxy    : Nginx Proxy Manager — frontend joins npmnetwork so NPM can
 #            reach frontend:8080 by container name without exposing host ports.
 # Redis    : Two local containers (cache + persistent queue)
@@ -11,9 +11,10 @@
 # ── Required variables (set in Portainer > Stack > Environment variables) ────
 #
 #   ERPNEXT_VERSION   ERPNext release tag, e.g. v16.16.0
-#   DB_HOST           Supabase direct connection host — db.<ref>.supabase.co
-#                     Use the DIRECT host (port 5432), NOT the transaction pooler
-#                     (port 6543). Frappe holds persistent connections.
+#   DB_HOST           Supabase session pooler host
+#                     e.g. aws-0-us-east-1.pooler.supabase.com
+#                     Use the SESSION pooler (port 5432), NOT the transaction
+#                     pooler (port 6543) — Frappe uses persistent connections.
 #   DB_PASSWORD       Supabase "postgres" role password
 #
 # ── Optional variables ────────────────────────────────────────────────────────
@@ -21,8 +22,8 @@
 #   DB_PORT                  5432 (default)
 #   DB_SSL_MODE              require (default — Supabase enforces SSL)
 #   FRAPPE_SITE_NAME_HEADER  $$host (default — route by HTTP Host header)
-#   UPSTREAM_REAL_IP_ADDRESS 127.0.0.1 (set to NPM container subnet if real
-#                            client IPs matter, e.g. 172.20.0.0/16)
+#   UPSTREAM_REAL_IP_ADDRESS 172.18.0.0/16 (NPM network subnet — set so
+#                            ERPNext sees real client IPs not NPM container IP)
 #   UPSTREAM_REAL_IP_HEADER  X-Forwarded-For (default)
 #   UPSTREAM_REAL_IP_RECURSIVE off (default)
 #   PROXY_READ_TIMEOUT       120 (seconds, increase for slow reports)
@@ -35,14 +36,17 @@
 #
 # ── Site creation (run once per corporation after first deploy) ───────────────
 #
-#   docker exec -it <stack>_backend_1 \
-#     bench new-site \
-#       --db-type postgres \
-#       --db-root-username postgres \
-#       --db-root-password <DB_PASSWORD> \
-#       --admin-password <your-admin-password> \
-#       --install-app erpnext \
-#       corp1.yourdomain.com
+#   docker exec -it erpnext-backend-1 bash
+#
+#   bench new-site \
+#     --db-type postgres \
+#     --db-root-username postgres.<project-ref> \
+#     --db-root-password "$DB_PASSWORD" \
+#     --db-user postgres.<project-ref> \
+#     --db-password "$DB_PASSWORD" \
+#     --admin-password <your-admin-password> \
+#     --install-app erpnext \
+#     corp1.yourdomain.com
 #
 #   Then in NPM: add Proxy Host corp1.yourdomain.com → frontend:8080
 #   Enable "Websockets Support" in NPM for real-time features.
@@ -59,12 +63,22 @@ x-image: &image
 x-db-ssl: &db_ssl
   PGSSLMODE: ${DB_SSL_MODE:-require}
 
+# Supabase PostgreSQL compatibility patches.
+# These files override Frappe source to fix issues with the session pooler:
+#   setup_db.py — fixes cur_db_name, ALTER DATABASE OWNER TO, and psql bootstrap
+#   goal.py     — fixes AmbiguousFunction: sum(unknown) on PG dashboard widgets
+# Scoped to v16.16.0. Re-copy from container if ERPNEXT_VERSION is bumped:
+#   docker cp erpnext-backend-1:/home/frappe/frappe-bench/apps/frappe/frappe/database/postgres/setup_db.py patches/frappe/database/postgres/setup_db.py
+#   docker cp erpnext-backend-1:/home/frappe/frappe-bench/apps/frappe/frappe/utils/goal.py patches/frappe/utils/goal.py
+
 x-backend-defaults: &backend_defaults
   <<: *image
   environment:
     <<: *db_ssl
   volumes:
     - sites:/home/frappe/frappe-bench/sites
+    - ./patches/frappe/database/postgres/setup_db.py:/home/frappe/frappe-bench/apps/frappe/frappe/database/postgres/setup_db.py:ro
+    - ./patches/frappe/utils/goal.py:/home/frappe/frappe-bench/apps/frappe/frappe/utils/goal.py:ro
   depends_on:
     configurator:
       condition: service_completed_successfully
@@ -97,6 +111,7 @@ services:
     restart: on-failure
     volumes:
       - sites:/home/frappe/frappe-bench/sites
+      - ./patches/frappe/database/postgres/setup_db.py:/home/frappe/frappe-bench/apps/frappe/frappe/database/postgres/setup_db.py:ro
 
   # ── Application backend (Gunicorn on :8000) ─────────────────────────────────
   backend:
