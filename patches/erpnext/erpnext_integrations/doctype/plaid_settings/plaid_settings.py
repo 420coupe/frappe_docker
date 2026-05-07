@@ -259,7 +259,7 @@ def get_transactions(bank, bank_account=None, start_date=None, end_date=None):
 		account_id = related_bank[0].integration_id if related_bank else None
 
 		if plaid_item_name:
-			access_token = frappe.db.get_value("Plaid Item", plaid_item_name, "access_token")
+			access_token = frappe.get_doc("Plaid Item", plaid_item_name).get_password("access_token")
 		else:
 			# Backward compat: fall back to Bank.plaid_access_token and lazily migrate
 			access_token = frappe.db.get_value("Bank", related_bank[0].bank, "plaid_access_token")
@@ -395,7 +395,7 @@ def enqueue_synchronization():
 @frappe.whitelist()
 def get_link_token_for_update(access_token=None, plaid_item=None):
 	if plaid_item:
-		access_token = frappe.db.get_value("Plaid Item", plaid_item, "access_token")
+		access_token = frappe.get_doc("Plaid Item", plaid_item).get_password("access_token")
 	plaid = PlaidConnector(access_token)
 	return plaid.get_link_token(update_mode=True)
 
