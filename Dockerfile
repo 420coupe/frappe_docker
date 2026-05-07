@@ -1,4 +1,4 @@
-ARG ERPNEXT_VERSION=v16.16.0
+ARG ERPNEXT_VERSION=v16.17.0
 FROM frappe/erpnext:${ERPNEXT_VERSION}
 
 # Supabase/PostgreSQL session pooler compatibility patches.
@@ -9,6 +9,7 @@ FROM frappe/erpnext:${ERPNEXT_VERSION}
 # financial_statements.py: guards FORCE INDEX (MySQL-only) from PostgreSQL
 # pricing_rule/utils.py:  IFNULL → COALESCE (ANSI SQL)
 # pos_register.py:        IF()/IFNULL → CASE WHEN/COALESCE (ANSI SQL)
+# number_card.py:         order_by=None on aggregate get_list (PostgreSQL GroupingError)
 #
 # When upgrading ERPNEXT_VERSION, re-copy base files from the new image,
 # re-apply patches, then rebuild:
@@ -27,6 +28,9 @@ FROM frappe/erpnext:${ERPNEXT_VERSION}
 #   docker run --rm --entrypoint="" frappe/erpnext:<newver> \
 #     cat /home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/report/pos_register/pos_register.py \
 #     > patches/erpnext/accounts/report/pos_register/pos_register.py
+#   docker run --rm --entrypoint="" frappe/erpnext:<newver> \
+#     cat /home/frappe/frappe-bench/apps/frappe/frappe/desk/doctype/number_card/number_card.py \
+#     > patches/frappe/desk/doctype/number_card/number_card.py
 
 COPY --chown=frappe:frappe \
      patches/frappe/database/postgres/setup_db.py \
@@ -76,3 +80,8 @@ COPY --chown=frappe:frappe \
 COPY --chown=frappe:frappe \
      patches/erpnext/accounts/report/pos_register/pos_register.py \
      /home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/report/pos_register/pos_register.py
+
+# number_card.py: order_by=None on aggregate get_list fixes PostgreSQL GroupingError
+COPY --chown=frappe:frappe \
+     patches/frappe/desk/doctype/number_card/number_card.py \
+     /home/frappe/frappe-bench/apps/frappe/frappe/desk/doctype/number_card/number_card.py
